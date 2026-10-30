@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Break &amp; Run — Multiplayer 8-Ball Pool</title>
+  <meta name="description" content="Real-time multiplayer 8-ball pool. Play a random opponent or invite a friend with a room code.">
+  <meta name="theme-color" content="#07110d">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%23111'/%3E%3Ccircle cx='16' cy='16' r='8' fill='%23fff'/%3E%3Ctext x='16' y='21' font-size='11' font-family='Arial' font-weight='bold' text-anchor='middle' fill='%23111'%3E8%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="bg-glow" aria-hidden="true"></div>
+  <div class="bg-grid" aria-hidden="true"></div>
+
+  <!-- ============================== LOBBY ============================== -->
+  <section id="lobby" class="screen">
+    <header class="brand">
+      <div class="brand-ball"><span>8</span></div>
+      <div class="brand-text">
+        <h1>Break <span class="amp">&amp;</span> Run</h1>
+        <p>Real-time multiplayer 8-ball pool</p>
+      </div>
+    </header>
+
+    <div class="lobby-grid">
+      <div class="card main-card">
+        <label class="field-label" for="nameInput">Display name</label>
+        <input id="nameInput" class="input" maxlength="14" autocomplete="off" spellcheck="false" placeholder="Your name">
+
+        <button id="playBtn" class="btn btn-primary btn-lg">
+          <span class="pulse-dot"></span>
+          <span>Play random opponent</span>
+        </button>
+
+        <div class="or"><span>or play with a friend</span></div>
+
+        <button id="createBtn" class="btn btn-soft">Create private room</button>
+
+        <div class="join-row">
+          <input id="codeInput" class="input code-input" maxlength="5" autocomplete="off" spellcheck="false" placeholder="CODE">
+          <button id="joinBtn" class="btn btn-soft">Join</button>
+        </div>
+
+        <p class="hint" id="lobbyHint">Create a room and share the 5-character code.</p>
+      </div>
+
+      <aside class="card side-card">
+        <h2>How to play</h2>
+        <ul class="rules">
+          <li><span class="rule-ico">🎯</span><div><b>Aim</b> with your mouse. Press and <b>pull back</b> to load power, then release to shoot.</div></li>
+          <li><span class="rule-ico">🎱</span><div>Pot all 7 balls of your group, then sink the <b>8-ball</b> to win.</div></li>
+          <li><span class="rule-ico">⚠️</span><div>Scratch, whiff, or hit the wrong ball first and your opponent gets <b>ball in hand</b>.</div></li>
+        </ul>
+        <div class="keys">
+          <span><kbd>←</kbd><kbd>→</kbd> fine aim</span>
+          <span><kbd>Space</kbd> charge shot</span>
+        </div>
+      </aside>
+    </div>
+
+    <footer class="foot">
+      <span class="foot-dot"></span> Server-authoritative physics &middot; no installs, no accounts
+    </footer>
+  </section>
+
+  <!-- ============================= WAITING ============================= -->
+  <section id="waiting" class="screen hidden">
+    <div class="card wait-card">
+      <div class="spinner" aria-hidden="true"></div>
+      <h2 id="waitTitle">Looking for an opponent…</h2>
+      <p class="hint" id="waitSub">You will be matched with the next player in the queue.</p>
+
+      <div class="code-block hidden" id="codeBlock">
+        <div class="code-label">ROOM CODE</div>
+        <div class="code-digits" id="codeDigits"></div>
+        <button id="copyBtn" class="btn btn-soft btn-sm">Copy invite link</button>
+      </div>
+
+      <button id="cancelBtn" class="btn btn-ghost">Cancel</button>
+    </div>
+  </section>
+
+  <!-- ============================== GAME =============================== -->
+  <section id="game" class="screen hidden">
+    <div class="game-top">
+      <button id="leaveBtn" class="icon-btn" title="Leave table" aria-label="Leave table">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
+      </button>
+
+      <div class="pchip" id="p0">
+        <div class="avatar" id="p0av">?</div>
+        <div class="pmeta">
+          <div class="pname" id="p0name">Waiting</div>
+          <div class="pgroup" id="p0group">open table</div>
+        </div>
+        <div class="remain" id="p0remain"></div>
+      </div>
+
+      <div class="mid-status">
+        <div class="turn-pill" id="turnPill">Connecting…</div>
+        <div class="room-mini" id="roomMini">—</div>
+      </div>
+
+      <div class="pchip right" id="p1">
+        <div class="pmeta">
+          <div class="pname" id="p1name">Waiting</div>
+          <div class="pgroup" id="p1group">open table</div>
+        </div>
+        <div class="avatar" id="p1av">?</div>
+        <div class="remain" id="p1remain"></div>
+      </div>
+
+      <button id="soundBtn" class="icon-btn" title="Toggle sound" aria-label="Toggle sound">
+        <svg id="soundOnIcon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+        <svg id="soundOffIcon" class="hidden" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4z"/><path d="m16 9 6 6"/><path d="m22 9-6 6"/></svg>
+      </button>
+    </div>
+
+    <div class="table-wrap" id="tableWrap">
+      <canvas id="table"></canvas>
+      <div class="banner hidden" id="banner"></div>
+      <div class="net-warn hidden" id="netWarn">Connection lost — reconnecting…</div>
+    </div>
+
+    <div class="game-bottom">
+      <div class="tray-wrap">
+        <div class="tray-label">POTTED</div>
+        <div class="tray" id="tray"><span class="tray-empty">—</span></div>
+      </div>
+      <div class="power-wrap" id="powerWrap">
+        <div class="power-top"><span>POWER</span><span id="powerPct">0%</span></div>
+        <div class="power-track"><div class="power-fill" id="powerFill"></div><div class="power-notch"></div></div>
+      </div>
+      <div class="hint-line" id="hintLine">Aim with the mouse, then press &amp; pull back to shoot.</div>
+    </div>
+  </section>
+
+  <!-- ============================= RESULT ============================== -->
+  <div id="resultOverlay" class="overlay hidden">
+    <div class="card result-card">
+      <div class="result-emoji" id="resultEmoji">🏆</div>
+      <h2 id="resultTitle">You win!</h2>
+      <p class="hint" id="resultSub"></p>
+      <div class="result-actions">
+        <button id="rematchBtn" class="btn btn-primary">Rematch</button>
+        <button id="lobbyBtn" class="btn btn-soft">Back to lobby</button>
+      </div>
+      <p class="hint small" id="rematchHint"></p>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>
