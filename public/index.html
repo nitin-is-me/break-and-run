@@ -43,14 +43,20 @@
         </div>
 
         <p class="hint" id="lobbyHint">Create a room and share the 5-character code.</p>
+
+        <button id="fullscreenBtn" class="btn btn-soft btn-sm fullscreen-hint" hidden>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+          Play in full screen
+        </button>
       </div>
 
       <aside class="card side-card">
         <h2>How to play</h2>
         <ul class="rules">
-          <li><span class="rule-ico">🎯</span><div><b>Aim</b> with your mouse. Press and <b>pull back</b> to load power, then release to shoot.</div></li>
+          <li><span class="rule-ico">🎯</span><div><b>Aim</b> — drag anywhere on the table to aim.</div></li>
+          <li><span class="rule-ico">🏹</span><div><b>Shoot</b> — drag back from the cue ball to set power, then release.</div></li>
           <li><span class="rule-ico">🎱</span><div>Pot all 7 balls of your group, then sink the <b>8-ball</b> to win.</div></li>
-          <li><span class="rule-ico">⚠️</span><div>Scratch, whiff, or hit the wrong ball first and your opponent gets <b>ball in hand</b>.</div></li>
+          <li><span class="rule-ico">⚠️</span><div>Scratch, whiff, or hit the wrong ball first → opponent gets <b>ball in hand</b>.</div></li>
         </ul>
         <div class="keys">
           <span><kbd>←</kbd><kbd>→</kbd> fine aim</span>
@@ -135,6 +141,16 @@
       <div class="hint-line" id="hintLine">Aim with the mouse, then press &amp; pull back to shoot.</div>
     </div>
   </section>
+
+  <!-- =========================== ROTATE PROMPT =========================== -->
+  <div id="rotatePrompt" class="overlay hidden" aria-hidden="true">
+    <div class="rotate-card">
+      <svg viewBox="0 0 24 24" width="64" height="64" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+      <h2>Rotate your device</h2>
+      <p>This game works best in landscape orientation.</p>
+      <button id="rotateDismiss" class="btn btn-soft" hidden>Continue anyway</button>
+    </div>
+  </div>
 
   <!-- ============================= RESULT ============================== -->
   <div id="resultOverlay" class="overlay hidden">

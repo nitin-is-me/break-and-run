@@ -907,3 +907,52 @@ kbd {
   .hint-line { display: none; }
 }
 
+/* ======================================================================= mobile fullscreen hint */
+.fullscreen-hint {
+  margin-top: 12px;
+  width: 100%;
+  justify-content: center;
+}
+
+@media (min-width: 700px) {
+  .fullscreen-hint { display: none; }
+}
+
+/* ======================================================================= rotate prompt */
+#rotatePrompt {
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(8px);
+  z-index: 100;
+}
+
+.rotate-card {
+  text-align: center;
+  padding: 32px 24px;
+  max-width: 320px;
+  animation: pop-in 0.4s cubic-bezier(0.2, 1.3, 0.4, 1) both;
+}
+
+.rotate-card svg {
+  color: var(--gold);
+  margin-bottom: 16px;
+  opacity: 0.9;
+}
+
+.rotate-card h2 {
+  margin: 0 0 8px;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.rotate-card p {
+  margin: 0 0 24px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.rotate-card .btn {
+  width: auto;
+  padding-inline: 28px;
+}
+

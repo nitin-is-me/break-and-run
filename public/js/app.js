@@ -96,6 +96,8 @@ const S = {
   keyCharging: false,
   power: 0,
   hover: null,
+  aiming: false,
+  aimPointerId: null,
 
   overlayShown: false,
   latency: 0,
@@ -280,6 +282,7 @@ function goLobby(reason) {
   S.sim = null;
   S.pending = null;
   S.charging = false;
+  S.aiming = false;
   S.keyCharging = false;
   S.power = 0;
   S.overlayShown = false;
@@ -444,6 +447,15 @@ function updateHUD() {
   }
   els.hintLine.textContent = hint;
 
+  // Clear aiming/charging when not our turn
+  if (st.turn !== me.id || st.phase !== 'playing' || st.ballInHand) {
+    S.aiming = false;
+    S.charging = false;
+    S.keyCharging = false;
+    S.power = 0;
+    updatePowerUI();
+  }
+
   canvas.classList.toggle('idle', !canShoot() && !(st.ballInHand && st.turn === me.id && !S.sim));
 
   updateRoomMini();
@@ -567,6 +579,11 @@ canvas.addEventListener('pointermove', (e) => {
     return;
   }
 
+  if (S.aiming) {
+    updateAimFromPointer(p);
+    return;
+  }
+
   if (myTurn() && !S.room.ballInHand && e.pointerType !== 'touch') {
     updateAimFromPointer(p);
   }
@@ -595,25 +612,50 @@ canvas.addEventListener('pointerdown', (e) => {
 
   if (!canShoot()) return;
 
+  const cue = cueBall(S.room.balls);
+  if (!cue) return;
+
+  // Touch: determine if this is aim (anywhere) or charge (near cue ball)
   if (e.pointerType === 'touch') {
-    const cue = cueBall(S.room.balls);
-    if (cue) {
-      const dx = p.x - cue.x;
-      const dy = p.y - cue.y;
-      if (dx * dx + dy * dy > 400) S.aim = Math.atan2(dy, dx);
+    const dx = p.x - cue.x;
+    const dy = p.y - cue.y;
+    const dist2 = dx * dx + dy * dy;
+    const CUE_RADIUS = BALL_R * 3.5; // generous touch target around cue ball
+
+    if (dist2 < CUE_RADIUS * CUE_RADIUS) {
+      // Start charging from cue ball
+      S.charging = true;
+      S.chargeAngle = S.aim;
+      S.chargeOrigin = p;
+      S.power = 0;
+      S.pointerId = e.pointerId;
+      try { canvas.setPointerCapture(e.pointerId); } catch {}
+      updatePowerUI();
+      e.preventDefault();
+    } else {
+      // Start aiming from anywhere
+      S.aiming = true;
+      S.aimPointerId = e.pointerId;
+      updateAimFromPointer(p);
+      try { canvas.setPointerCapture(e.pointerId); } catch {}
+      e.preventDefault();
     }
+    return;
   }
 
-  S.charging = true;
-  S.chargeAngle = S.aim;
-  S.chargeOrigin = p;
-  S.power = 0;
-  S.pointerId = e.pointerId;
-  try {
-    canvas.setPointerCapture(e.pointerId);
-  } catch {}
-  updatePowerUI();
-  e.preventDefault();
+  // Mouse: press near cue ball to charge
+  const dx = p.x - cue.x;
+  const dy = p.y - cue.y;
+  if (dx * dx + dy * dy < BALL_R * BALL_R * 4) {
+    S.charging = true;
+    S.chargeAngle = S.aim;
+    S.chargeOrigin = p;
+    S.power = 0;
+    S.pointerId = e.pointerId;
+    try { canvas.setPointerCapture(e.pointerId); } catch {}
+    updatePowerUI();
+    e.preventDefault();
+  }
 });
 
 function endCharge(cancel = false) {
@@ -624,16 +666,29 @@ function endCharge(cancel = false) {
   S.power = 0;
   updatePowerUI();
   if (S.pointerId != null) {
-    try {
-      canvas.releasePointerCapture(S.pointerId);
-    } catch {}
+    try { canvas.releasePointerCapture(S.pointerId); } catch {}
     S.pointerId = null;
   }
   if (!cancel && power >= 0.05) shoot(angle, Math.max(0.07, power));
 }
 
-canvas.addEventListener('pointerup', () => endCharge(false));
-canvas.addEventListener('pointercancel', () => endCharge(true));
+function endAim(cancel = false) {
+  if (!S.aiming) return;
+  S.aiming = false;
+  if (S.aimPointerId != null) {
+    try { canvas.releasePointerCapture(S.aimPointerId); } catch {}
+    S.aimPointerId = null;
+  }
+}
+
+canvas.addEventListener('pointerup', (e) => {
+  if (S.aiming && e.pointerId === S.aimPointerId) endAim(false);
+  else if (S.charging && e.pointerId === S.pointerId) endCharge(false);
+});
+canvas.addEventListener('pointercancel', (e) => {
+  if (S.aiming && e.pointerId === S.aimPointerId) endAim(true);
+  else if (S.charging && e.pointerId === S.pointerId) endCharge(true);
+});
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
 function shoot(angle, power) {
@@ -854,6 +909,22 @@ function initLobby() {
     if (sound.enabled) sound.ensure();
   });
 
+  // Fullscreen button (mobile)
+  const fsBtn = $('fullscreenBtn');
+  if (fsBtn) {
+    const isMobile = /Mobi|Android/i.test(navigator.userAgent);
+    if (isMobile && !document.fullscreenElement) fsBtn.hidden = false;
+    fsBtn.addEventListener('click', async () => {
+      try {
+        await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
+        fsBtn.hidden = true;
+      } catch { toast('Fullscreen not available', true); }
+    });
+    document.addEventListener('fullscreenchange', () => {
+      fsBtn.hidden = !!document.fullscreenElement;
+    });
+  }
+
   if (!S.connected) {
     els.playBtn.disabled = true;
     els.createBtn.disabled = true;
@@ -905,6 +976,39 @@ setInterval(() => {
 
 // keep the table crisp when the window changes size
 window.addEventListener('orientationchange', () => setTimeout(() => renderer.resize(), 250));
+
+// ---- Orientation / rotate prompt for mobile ----
+const rotatePrompt = $('rotatePrompt');
+const rotateDismiss = $('rotateDismiss');
+let rotateDismissed = false;
+
+function checkOrientation() {
+  const isMobile = /Mobi|Android/i.test(navigator.userAgent);
+  const isLandscape = window.innerWidth > window.innerHeight;
+  const inGame = S.screen === 'game';
+
+  if (isMobile && inGame && !isLandscape && !rotateDismissed) {
+    rotatePrompt.classList.remove('hidden');
+    rotatePrompt.setAttribute('aria-hidden', 'false');
+  } else {
+    rotatePrompt.classList.add('hidden');
+    rotatePrompt.setAttribute('aria-hidden', 'true');
+  }
+}
+
+window.addEventListener('resize', checkOrientation);
+window.addEventListener('orientationchange', () => {
+  setTimeout(() => {
+    renderer.resize();
+    checkOrientation();
+  }, 300);
+});
+
+rotateDismiss?.addEventListener('click', () => {
+  rotateDismissed = true;
+  rotatePrompt.classList.add('hidden');
+  rotatePrompt.setAttribute('aria-hidden', 'true');
+});
 
 // handy for debugging / automated browser tests
 window.__pool = S;
