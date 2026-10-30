@@ -907,6 +907,68 @@ kbd {
   .hint-line { display: none; }
 }
 
+/* ======================================================================= landscape mobile - maximize table */
+@media (orientation: landscape) and (max-height: 600px) {
+  #game {
+    gap: 4px;
+    padding-top: 4px;
+    padding-bottom: 4px;
+    align-items: stretch;
+    justify-content: flex-start;
+  }
+
+  .game-top {
+    gap: 4px;
+    padding: 0 4px;
+    min-height: 36px;
+  }
+  .icon-btn { width: 30px; height: 30px; }
+  .pchip { padding: 3px 8px; gap: 6px; border-radius: 20px; }
+  .avatar { width: 22px; height: 22px; font-size: 9px; }
+  .pname { font-size: 10px; }
+  .pgroup { font-size: 7px; }
+  .turn-pill { font-size: 8px; padding: 2px 6px; }
+  .room-mini { display: none; }
+
+  .table-wrap {
+    max-width: min(100%, calc((100dvh - 56px) * 1.8007));
+    border-radius: 16px;
+    flex: 1;
+  }
+  #table { border-radius: 12px; }
+
+  .game-bottom {
+    grid-template-columns: 1fr auto;
+    grid-template-areas: "tray power";
+    gap: 6px 12px;
+    padding: 0 4px;
+    min-height: 32px;
+  }
+  .tray-label { display: none; }
+  .tray { gap: 3px; }
+  .tray-ball { width: 14px; height: 14px; font-size: 6px; }
+  .power-wrap { gap: 2px; }
+  .power-top { font-size: 7px; }
+  .power-track { height: 6px; }
+  .hint-line { display: none; }
+  .banner { top: 4px; font-size: 9px; padding: 4px 10px; }
+}
+
+/* Ultra-compact for very short landscape (e.g. iPhone SE landscape) */
+@media (orientation: landscape) and (max-height: 400px) {
+  #game { gap: 2px; padding-top: 2px; padding-bottom: 2px; }
+  .game-top { min-height: 28px; gap: 2px; }
+  .pchip { padding: 2px 6px; gap: 4px; }
+  .avatar { width: 18px; height: 18px; font-size: 8px; }
+  .pname { font-size: 9px; }
+  .turn-pill { font-size: 7px; padding: 2px 5px; }
+  .table-wrap { max-width: min(100%, calc((100dvh - 40px) * 1.8007)); border-radius: 10px; }
+  #table { border-radius: 8px; }
+  .game-bottom { min-height: 24px; gap: 4px 8px; }
+  .tray-ball { width: 12px; height: 12px; font-size: 5px; }
+  .power-track { height: 5px; }
+}
+
 /* ======================================================================= mobile fullscreen hint */
 .fullscreen-hint {
   margin-top: 12px;

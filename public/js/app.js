@@ -96,8 +96,6 @@ const S = {
   keyCharging: false,
   power: 0,
   hover: null,
-  aiming: false,
-  aimPointerId: null,
 
   overlayShown: false,
   latency: 0,
@@ -282,7 +280,6 @@ function goLobby(reason) {
   S.sim = null;
   S.pending = null;
   S.charging = false;
-  S.aiming = false;
   S.keyCharging = false;
   S.power = 0;
   S.overlayShown = false;
@@ -440,16 +437,15 @@ function updateHUD() {
       : 'Ball in hand — click a free spot on the felt to place the cue ball.';
   } else if (st.turn === me.id) {
     hint = TOUCH
-      ? 'Tap where you want to aim, then drag back and release to shoot.'
+      ? 'Press anywhere, drag back to aim & power, release to shoot.'
       : 'Aim with the mouse, then press & pull back to shoot. Space also charges a shot.';
   } else if (opp) {
     hint = `Waiting for ${opp.name}…`;
   }
   els.hintLine.textContent = hint;
 
-  // Clear aiming/charging when not our turn
+  // Clear charging when not our turn
   if (st.turn !== me.id || st.phase !== 'playing' || st.ballInHand) {
-    S.aiming = false;
     S.charging = false;
     S.keyCharging = false;
     S.power = 0;
@@ -571,20 +567,24 @@ canvas.addEventListener('pointermove', (e) => {
   S.hover = p;
 
   if (S.charging) {
-    const dx = p.x - S.chargeOrigin.x;
-    const dy = p.y - S.chargeOrigin.y;
-    const pull = -(dx * Math.cos(S.chargeAngle) + dy * Math.sin(S.chargeAngle));
-    S.power = clamp(pull / 210, 0, 1);
+    // Unified drag-back: vector from chargeOrigin to current pointer
+    // Drag BACK (away from target) = shoot FORWARD
+    const dx = S.chargeOrigin.x - p.x;  // reversed: drag back → aim forward
+    const dy = S.chargeOrigin.y - p.y;
+    const dist = Math.hypot(dx, dy);
+
+    if (dist > 8) {  // minimum drag to set angle
+      S.aim = Math.atan2(dy, dx);
+      S.chargeAngle = S.aim;
+    }
+    // Power based on drag distance (clamped)
+    S.power = clamp(dist / 220, 0, 1);
     updatePowerUI();
     return;
   }
 
-  if (S.aiming) {
-    updateAimFromPointer(p);
-    return;
-  }
-
-  if (myTurn() && !S.room.ballInHand && e.pointerType !== 'touch') {
+  // Hover aim for mouse (when not charging)
+  if (myTurn() && !S.room.ballInHand && e.pointerType !== 'touch' && !S.charging) {
     updateAimFromPointer(p);
   }
 });
@@ -597,7 +597,7 @@ canvas.addEventListener('pointerdown', (e) => {
 
   if (!S.room || S.room.phase !== 'playing' || S.sim) return;
 
-  // ball in hand: click to place
+  // ball in hand: tap to place
   if (S.room.turn === S.myId && S.room.ballInHand) {
     if (!validPlacement(p)) {
       toast('That spot is blocked — try another.', true, 1800);
@@ -612,50 +612,24 @@ canvas.addEventListener('pointerdown', (e) => {
 
   if (!canShoot()) return;
 
+  // Unified control: press anywhere, drag back to aim+power
+  S.charging = true;
+  S.chargeOrigin = p;
+  S.power = 0;
+  S.pointerId = e.pointerId;
+  // Set initial aim from press point to cue ball
   const cue = cueBall(S.room.balls);
-  if (!cue) return;
-
-  // Touch: determine if this is aim (anywhere) or charge (near cue ball)
-  if (e.pointerType === 'touch') {
-    const dx = p.x - cue.x;
-    const dy = p.y - cue.y;
-    const dist2 = dx * dx + dy * dy;
-    const CUE_RADIUS = BALL_R * 3.5; // generous touch target around cue ball
-
-    if (dist2 < CUE_RADIUS * CUE_RADIUS) {
-      // Start charging from cue ball
-      S.charging = true;
+  if (cue) {
+    const dx = cue.x - p.x;
+    const dy = cue.y - p.y;
+    if (dx * dx + dy * dy > 16) {
+      S.aim = Math.atan2(dy, dx);
       S.chargeAngle = S.aim;
-      S.chargeOrigin = p;
-      S.power = 0;
-      S.pointerId = e.pointerId;
-      try { canvas.setPointerCapture(e.pointerId); } catch {}
-      updatePowerUI();
-      e.preventDefault();
-    } else {
-      // Start aiming from anywhere
-      S.aiming = true;
-      S.aimPointerId = e.pointerId;
-      updateAimFromPointer(p);
-      try { canvas.setPointerCapture(e.pointerId); } catch {}
-      e.preventDefault();
     }
-    return;
   }
-
-  // Mouse: press near cue ball to charge
-  const dx = p.x - cue.x;
-  const dy = p.y - cue.y;
-  if (dx * dx + dy * dy < BALL_R * BALL_R * 4) {
-    S.charging = true;
-    S.chargeAngle = S.aim;
-    S.chargeOrigin = p;
-    S.power = 0;
-    S.pointerId = e.pointerId;
-    try { canvas.setPointerCapture(e.pointerId); } catch {}
-    updatePowerUI();
-    e.preventDefault();
-  }
+  try { canvas.setPointerCapture(e.pointerId); } catch {}
+  updatePowerUI();
+  e.preventDefault();
 });
 
 function endCharge(cancel = false) {
@@ -672,22 +646,11 @@ function endCharge(cancel = false) {
   if (!cancel && power >= 0.05) shoot(angle, Math.max(0.07, power));
 }
 
-function endAim(cancel = false) {
-  if (!S.aiming) return;
-  S.aiming = false;
-  if (S.aimPointerId != null) {
-    try { canvas.releasePointerCapture(S.aimPointerId); } catch {}
-    S.aimPointerId = null;
-  }
-}
-
 canvas.addEventListener('pointerup', (e) => {
-  if (S.aiming && e.pointerId === S.aimPointerId) endAim(false);
-  else if (S.charging && e.pointerId === S.pointerId) endCharge(false);
+  if (S.charging && e.pointerId === S.pointerId) endCharge(false);
 });
 canvas.addEventListener('pointercancel', (e) => {
-  if (S.aiming && e.pointerId === S.aimPointerId) endAim(true);
-  else if (S.charging && e.pointerId === S.pointerId) endCharge(true);
+  if (S.charging && e.pointerId === S.pointerId) endCharge(true);
 });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
