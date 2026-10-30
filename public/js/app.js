@@ -944,6 +944,7 @@ window.addEventListener('orientationchange', () => setTimeout(() => renderer.res
 const rotatePrompt = $('rotatePrompt');
 const rotateDismiss = $('rotateDismiss');
 let rotateDismissed = false;
+let hasRequestedFullscreen = false;
 
 function checkOrientation() {
   const isMobile = /Mobi|Android/i.test(navigator.userAgent);
@@ -957,6 +958,21 @@ function checkOrientation() {
     rotatePrompt.classList.add('hidden');
     rotatePrompt.setAttribute('aria-hidden', 'true');
   }
+
+  // Auto-request fullscreen on landscape
+  if (isMobile && inGame && isLandscape && !hasRequestedFullscreen && !document.fullscreenElement) {
+    requestFullscreenIfPossible();
+  }
+}
+
+async function requestFullscreenIfPossible() {
+  if (hasRequestedFullscreen) return;
+  hasRequestedFullscreen = true;
+  try {
+    await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
+  } catch {
+    // Ignore - user may have denied or browser blocks it
+  }
 }
 
 window.addEventListener('resize', checkOrientation);
@@ -966,6 +982,15 @@ window.addEventListener('orientationchange', () => {
     checkOrientation();
   }, 300);
 });
+
+// Also try fullscreen on first user interaction in game
+let fullscreenAttempted = false;
+canvas.addEventListener('pointerdown', () => {
+  if (!fullscreenAttempted && S.screen === 'game') {
+    fullscreenAttempted = true;
+    requestFullscreenIfPossible();
+  }
+}, { once: true });
 
 rotateDismiss?.addEventListener('click', () => {
   rotateDismissed = true;

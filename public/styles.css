@@ -908,13 +908,14 @@ kbd {
 }
 
 /* ======================================================================= landscape mobile - maximize table */
-@media (orientation: landscape) and (max-height: 600px) {
+@media (orientation: landscape) and (max-width: 900px) {
   #game {
     gap: 4px;
     padding-top: 4px;
     padding-bottom: 4px;
     align-items: stretch;
     justify-content: flex-start;
+    min-height: 100dvh;
   }
 
   .game-top {
