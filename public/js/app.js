@@ -57,6 +57,10 @@ const els = {
   powerFill: $('powerFill'),
   powerPct: $('powerPct'),
   hintLine: $('hintLine'),
+  cueSliderWrap: $('cueSliderWrap'),
+  cueSliderTrack: $('cueSliderTrack'),
+  cueSliderFill: $('cueSliderFill'),
+  cueSliderThumb: $('cueSliderThumb'),
 
   resultOverlay: $('resultOverlay'),
   resultEmoji: $('resultEmoji'),
@@ -96,6 +100,12 @@ const S = {
   keyCharging: false,
   power: 0,
   hover: null,
+
+  oppAim: null,
+  oppPower: 0,
+  oppActive: false,
+  renderOppAim: null,
+  renderOppPower: 0,
 
   overlayShown: false,
   latency: 0,
@@ -151,7 +161,7 @@ function toast(text, error = false, ms = 2800) {
 }
 
 let bannerTimer = 0;
-function showBanner(text, foul = false) {
+function showBanner(text, foul = false, ms = 5200) {
   if (!text) return;
   els.banner.textContent = text;
   els.banner.classList.remove('hidden');
@@ -160,7 +170,9 @@ function showBanner(text, foul = false) {
   void els.banner.offsetWidth;
   els.banner.style.animation = '';
   clearTimeout(bannerTimer);
-  bannerTimer = setTimeout(() => els.banner.classList.add('hidden'), 5200);
+  if (ms > 0) {
+    bannerTimer = setTimeout(() => els.banner.classList.add('hidden'), ms);
+  }
 }
 
 function hideBanner() {
@@ -175,6 +187,7 @@ function showScreen(name) {
   els.game.classList.toggle('hidden', name !== 'game');
   if (name === 'game') {
     requestAnimationFrame(() => renderer.resize());
+    checkOrientation();
   }
 }
 
@@ -256,6 +269,15 @@ function handleMessage(msg) {
     case 'shot':
       onShot(msg);
       break;
+    case 'aim':
+      S.oppAim = Number(msg.angle);
+      S.oppPower = Math.max(0, Math.min(1, Number(msg.power || 0)));
+      S.oppActive = true;
+      if (S.renderOppAim == null) {
+        S.renderOppAim = S.oppAim;
+        S.renderOppPower = S.oppPower;
+      }
+      break;
     case 'left':
       goLobby(msg.reason);
       break;
@@ -282,6 +304,11 @@ function goLobby(reason) {
   S.charging = false;
   S.keyCharging = false;
   S.power = 0;
+  S.oppAim = null;
+  S.oppPower = 0;
+  S.oppActive = false;
+  S.renderOppAim = null;
+  S.renderOppPower = 0;
   S.overlayShown = false;
   S.queued = false;
   S.hover = null;
@@ -328,10 +355,34 @@ function applyState(state) {
 
   updateHUD();
 
-  if (state.message && state.message !== prevMsg) {
+  if (state.phase === 'playing' && state.ballInHand) {
+    if (state.turn === S.myId) {
+      showBanner('🎯 Tap anywhere on the table to place the ball', false, 0);
+    } else {
+      const opp = state.players.find((p) => p.id !== S.myId);
+      showBanner(`⏳ ${opp ? opp.name : 'Opponent'} has ball in hand — placing the cue ball…`, false, 0);
+    }
+  } else if (prev?.ballInHand && !state.ballInHand) {
+    if (state.turn === S.myId) {
+      showBanner('Cue ball placed — take your shot', false, 2400);
+    } else {
+      const opp = state.players.find((p) => p.id !== S.myId);
+      showBanner(`${opp ? opp.name : 'Opponent'} placed the cue ball`, false, 2400);
+    }
+  } else if (state.message && state.message !== prevMsg) {
     showBanner(state.message, /foul/i.test(state.message));
   } else if (state.phase === 'playing' && state.turn === S.myId && prevTurn !== S.myId) {
     showBanner('Your turn', false);
+  }
+
+  if (state.turn !== S.myId) {
+    S.oppPower = 0;
+    S.renderOppPower = 0;
+  } else {
+    S.oppActive = false;
+    if (state.phase === 'playing' && !state.ballInHand && !S.sim) {
+      broadcastAim(true);
+    }
   }
 
   if (state.phase === 'over') maybeShowResult();
@@ -340,6 +391,8 @@ function applyState(state) {
 
 function onShot(msg) {
   if (!S.room) return;
+  S.oppPower = 0;
+  S.renderOppPower = 0;
   if (msg.by === S.myId && S.sim && S.simIsMine) {
     S.pending = msg.state;
     if (S.sim.done) finishShot();
@@ -498,8 +551,13 @@ function updateRoomMini() {
 
 function updatePowerUI() {
   const pct = Math.round(S.power * 100);
-  els.powerFill.style.width = `${pct}%`;
-  els.powerPct.textContent = `${pct}%`;
+  if (els.powerFill) els.powerFill.style.width = `${pct}%`;
+  if (els.powerPct) els.powerPct.textContent = `${pct}%`;
+  if (els.powerWrap) els.powerWrap.classList.toggle('live', S.power > 0 || S.charging || S.keyCharging || isDraggingSlider);
+
+  // Sync vertical cue power slider
+  if (els.cueSliderFill) els.cueSliderFill.style.height = `${pct}%`;
+  if (els.cueSliderThumb) els.cueSliderThumb.style.top = `${pct}%`;
 }
 
 function showWaiting(mode, code) {
@@ -553,39 +611,80 @@ function hideResult() {
 
 /* ----------------------------------------------------------------- input */
 
+let lastAimSent = 0;
+let lastSentAngle = null;
+let lastSentPower = null;
+
+function broadcastAim(immediate = false) {
+  if (!S.room || S.room.phase !== 'playing' || S.room.turn !== S.myId || S.room.ballInHand || S.sim) return;
+  const now = performance.now();
+  const angle = S.charging ? S.chargeAngle : S.aim;
+  const power = Math.max(0, Math.min(1, S.power || 0));
+
+  if (!immediate) {
+    if (now - lastAimSent < 35) return;
+    if (lastSentAngle !== null && Math.abs(angle - lastSentAngle) < 0.001 && Math.abs(power - lastSentPower) < 0.005) {
+      return;
+    }
+  }
+
+  lastAimSent = now;
+  lastSentAngle = angle;
+  lastSentPower = power;
+  send({ t: 'aim', angle, power });
+}
+
 function updateAimFromPointer(p) {
   const cue = cueBall(S.room.balls);
   if (!cue) return;
   const dx = p.x - cue.x;
   const dy = p.y - cue.y;
-  if (dx * dx + dy * dy < 36) return;
+  if (dx * dx + dy * dy < 16) return;
   S.aim = Math.atan2(dy, dx);
+  S.chargeAngle = S.aim;
 }
+
+// Track input state
+let isTouchAiming = false;
+let isDraggingSlider = false;
 
 canvas.addEventListener('pointermove', (e) => {
   const p = renderer.toWorld(e.clientX, e.clientY);
   S.hover = p;
 
-  if (S.charging) {
-    // Unified drag-back: vector from chargeOrigin to current pointer
-    // Drag BACK (away from target) = shoot FORWARD
-    const dx = S.chargeOrigin.x - p.x;  // reversed: drag back → aim forward
-    const dy = S.chargeOrigin.y - p.y;
-    const dist = Math.hypot(dx, dy);
+  if (e.pointerType === 'mouse') {
+    // ----------------- PC MOUSE CONTROLS -----------------
+    if (S.charging) {
+      // Angle was decided upon click and is strictly locked!
+      S.aim = S.lockedAngle;
+      S.chargeAngle = S.lockedAngle;
 
-    if (dist > 8) {  // minimum drag to set angle
-      S.aim = Math.atan2(dy, dx);
-      S.chargeAngle = S.aim;
+      const dx = p.x - S.chargeOrigin.x;
+      const dy = p.y - S.chargeOrigin.y;
+      const pull = -(dx * Math.cos(S.lockedAngle) + dy * Math.sin(S.lockedAngle));
+
+      if (pull > 5) {
+        S.power = clamp(pull / 180, 0, 1);
+      } else {
+        S.power = 0;
+      }
+      updatePowerUI();
+      broadcastAim();
+      return;
     }
-    // Power based on drag distance (clamped)
-    S.power = clamp(dist / 220, 0, 1);
-    updatePowerUI();
-    return;
-  }
 
-  // Hover aim for mouse (when not charging)
-  if (myTurn() && !S.room.ballInHand && e.pointerType !== 'touch' && !S.charging) {
-    updateAimFromPointer(p);
+    // Hover aim for mouse on PC (when not clicking / holding)
+    if (myTurn() && !S.room.ballInHand) {
+      updateAimFromPointer(p);
+      broadcastAim();
+    }
+  } else {
+    // ----------------- MOBILE / TOUCH AIMING -----------------
+    // Finger on table controls aim: shot line points towards finger (opposite cue stick)
+    if (isTouchAiming && myTurn() && !S.room.ballInHand) {
+      updateAimFromPointer(p);
+      broadcastAim();
+    }
   }
 });
 
@@ -606,29 +705,35 @@ canvas.addEventListener('pointerdown', (e) => {
     send({ t: 'place', x: p.x, y: p.y });
     S.room.balls = S.room.balls.filter((b) => b.id !== 0).concat([{ id: 0, x: p.x, y: p.y }]);
     S.room.ballInHand = false;
+    showBanner('Cue ball placed — take your shot', false, 2400);
     updateHUD();
+    broadcastAim(true);
     return;
   }
 
   if (!canShoot()) return;
 
-  // Unified control: press anywhere, drag back to aim+power
-  S.charging = true;
-  S.chargeOrigin = p;
-  S.power = 0;
-  S.pointerId = e.pointerId;
-  // Set initial aim from press point to cue ball
-  const cue = cueBall(S.room.balls);
-  if (cue) {
-    const dx = cue.x - p.x;
-    const dy = cue.y - p.y;
-    if (dx * dx + dy * dy > 16) {
-      S.aim = Math.atan2(dy, dx);
-      S.chargeAngle = S.aim;
-    }
+  if (e.pointerType === 'mouse') {
+    // PC: Angle is decided on click and locked!
+    updateAimFromPointer(p);
+    S.lockedAngle = S.aim;
+    S.chargeAngle = S.aim;
+    S.chargeOrigin = p;
+    S.charging = true;
+    S.power = 0;
+    S.pointerId = e.pointerId;
+    try { canvas.setPointerCapture(e.pointerId); } catch {}
+    updatePowerUI();
+    broadcastAim(true);
+  } else {
+    // MOBILE TOUCH: Touch on table aims towards finger (no power, no shot)
+    isTouchAiming = true;
+    S.pointerId = e.pointerId;
+    updateAimFromPointer(p);
+    try { canvas.setPointerCapture(e.pointerId); } catch {}
+    broadcastAim(true);
   }
-  try { canvas.setPointerCapture(e.pointerId); } catch {}
-  updatePowerUI();
+
   e.preventDefault();
 });
 
@@ -636,23 +741,111 @@ function endCharge(cancel = false) {
   if (!S.charging) return;
   const power = S.power;
   const angle = S.chargeAngle;
+
   S.charging = false;
   S.power = 0;
   updatePowerUI();
+  broadcastAim(true);
+
   if (S.pointerId != null) {
     try { canvas.releasePointerCapture(S.pointerId); } catch {}
     S.pointerId = null;
   }
-  if (!cancel && power >= 0.05) shoot(angle, Math.max(0.07, power));
+
+  // Shoot only if dragged with sufficient power; otherwise cancelled!
+  if (!cancel && power >= 0.05) {
+    shoot(angle, Math.max(0.07, power));
+  }
 }
 
 canvas.addEventListener('pointerup', (e) => {
-  if (S.charging && e.pointerId === S.pointerId) endCharge(false);
+  if (e.pointerType === 'mouse') {
+    if (S.charging && e.pointerId === S.pointerId) endCharge(false);
+  } else {
+    if (isTouchAiming && e.pointerId === S.pointerId) {
+      isTouchAiming = false;
+      try { canvas.releasePointerCapture(e.pointerId); } catch {}
+      S.pointerId = null;
+      broadcastAim(true);
+    }
+  }
 });
+
 canvas.addEventListener('pointercancel', (e) => {
-  if (S.charging && e.pointerId === S.pointerId) endCharge(true);
+  if (e.pointerType === 'mouse') {
+    if (S.charging && e.pointerId === S.pointerId) endCharge(true);
+  } else {
+    isTouchAiming = false;
+    try { canvas.releasePointerCapture(e.pointerId); } catch {}
+    S.pointerId = null;
+    broadcastAim(true);
+  }
 });
-canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+canvas.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  if (S.charging) endCharge(true); // Right-click cancels shot on PC
+});
+
+/* -------------------------------------------------- vertical power slider */
+
+function initCueSlider() {
+  const wrap = els.cueSliderWrap;
+  const track = els.cueSliderTrack;
+  if (!wrap || !track) return;
+
+  function setPowerFromEvent(e) {
+    const rect = track.getBoundingClientRect();
+    if (rect.height <= 0) return;
+    const y = e.clientY - rect.top;
+    const ratio = clamp(y / rect.height, 0, 1);
+    S.power = ratio;
+    updatePowerUI();
+    broadcastAim();
+  }
+
+  wrap.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if (!canShoot() || S.room.ballInHand) return;
+    sound.ensure();
+    isDraggingSlider = true;
+    wrap.classList.add('active');
+    try { wrap.setPointerCapture(e.pointerId); } catch {}
+    setPowerFromEvent(e);
+    e.preventDefault();
+  });
+
+  wrap.addEventListener('pointermove', (e) => {
+    if (!isDraggingSlider) return;
+    setPowerFromEvent(e);
+    e.preventDefault();
+  });
+
+  function endSlider(cancel = false) {
+    if (!isDraggingSlider) return;
+    isDraggingSlider = false;
+    wrap.classList.remove('active');
+    const power = S.power;
+    S.power = 0;
+    updatePowerUI();
+    broadcastAim(true);
+
+    // Release to shoot if power >= 0.05, else cancel
+    if (!cancel && power >= 0.05) {
+      shoot(S.aim, Math.max(0.07, power));
+    }
+  }
+
+  wrap.addEventListener('pointerup', (e) => {
+    try { wrap.releasePointerCapture(e.pointerId); } catch {}
+    endSlider(false);
+  });
+
+  wrap.addEventListener('pointercancel', (e) => {
+    try { wrap.releasePointerCapture(e.pointerId); } catch {}
+    endSlider(true);
+  });
+}
 
 function shoot(angle, power) {
   if (!canShoot()) return;
@@ -669,6 +862,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
     if (!canShoot()) return;
     S.aim += (e.code === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? 0.004 : 0.016);
+    broadcastAim();
     e.preventDefault();
   } else if (e.code === 'Space') {
     if (!canShoot() || S.keyCharging) return;
@@ -679,6 +873,7 @@ window.addEventListener('keydown', (e) => {
     S.keyCharging = false;
     S.power = 0;
     updatePowerUI();
+    broadcastAim(true);
   }
 });
 
@@ -688,6 +883,7 @@ window.addEventListener('keyup', (e) => {
   const power = S.power;
   S.power = 0;
   updatePowerUI();
+  broadcastAim(true);
   if (power >= 0.05) shoot(S.aim, Math.max(0.07, power));
 });
 
@@ -728,6 +924,23 @@ function stepSim(dt) {
   }
 }
 
+function defaultAimAngle(balls, cue) {
+  if (!cue) return 0;
+  let target = null;
+  let minDist = Infinity;
+  for (const b of balls) {
+    if (b.id === 0) continue;
+    const dx = b.x - cue.x;
+    const dy = b.y - cue.y;
+    const d = dx * dx + dy * dy;
+    if (d < minDist) {
+      minDist = d;
+      target = b;
+    }
+  }
+  return target ? Math.atan2(target.y - cue.y, target.x - cue.x) : 0;
+}
+
 function draw() {
   if (!S.room) {
     renderer.draw({ balls: [] });
@@ -746,12 +959,22 @@ function draw() {
     balls = balls.filter((b) => b.id !== 0);
   }
 
+  const isOppTurn = st.phase === 'playing' && st.turn !== S.myId && !S.sim && !st.ballInHand;
+  const showOppCue = isOppTurn && !!cue;
+
+  const showAim = (turnMine && !placing && !!cue) || showOppCue;
+  const showCue = (turnMine && !placing && !!cue) || showOppCue;
+  const aimAngle = turnMine
+    ? (S.charging ? S.chargeAngle : S.aim)
+    : (S.renderOppAim != null ? S.renderOppAim : (S.oppAim != null ? S.oppAim : defaultAimAngle(balls, cue)));
+  const power = turnMine ? S.power : Math.max(0, S.renderOppPower || 0);
+
   renderer.draw({
     balls,
-    showAim: turnMine && !placing && !!cue,
-    showCue: turnMine && !placing && !!cue,
-    aimAngle: S.aim,
-    power: S.power,
+    showAim,
+    showCue,
+    aimAngle,
+    power,
     ballInHand: placing,
     ghost,
   });
@@ -762,9 +985,25 @@ function loop(now) {
   const dt = Math.min(0.06, (now - lastFrame) / 1000);
   lastFrame = now;
 
+  // Smooth opponent aim angle & power
+  if (S.oppAim != null) {
+    if (S.renderOppAim == null) {
+      S.renderOppAim = S.oppAim;
+      S.renderOppPower = S.oppPower;
+    } else {
+      let diff = (S.oppAim - S.renderOppAim) % (Math.PI * 2);
+      if (diff < -Math.PI) diff += Math.PI * 2;
+      if (diff > Math.PI) diff -= Math.PI * 2;
+      const t = 1 - Math.exp(-25 * dt);
+      S.renderOppAim += diff * t;
+      S.renderOppPower += ((S.oppPower || 0) - S.renderOppPower) * t;
+    }
+  }
+
   if (S.keyCharging && canShoot()) {
     S.power = Math.min(1, S.power + dt * 0.85);
     updatePowerUI();
+    broadcastAim();
   }
 
   stepSim(dt);
@@ -872,21 +1111,19 @@ function initLobby() {
     if (sound.enabled) sound.ensure();
   });
 
-  // Fullscreen button (mobile)
+  // Fullscreen buttons (works on both PC and mobile)
   const fsBtn = $('fullscreenBtn');
-  if (fsBtn) {
-    const isMobile = /Mobi|Android/i.test(navigator.userAgent);
-    if (isMobile && !document.fullscreenElement) fsBtn.hidden = false;
-    fsBtn.addEventListener('click', async () => {
-      try {
-        await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
-        fsBtn.hidden = true;
-      } catch { toast('Fullscreen not available', true); }
-    });
-    document.addEventListener('fullscreenchange', () => {
-      fsBtn.hidden = !!document.fullscreenElement;
-    });
-  }
+  const gameFsBtn = $('gameFullscreenBtn');
+  const rotateFsBtn = $('rotateFullscreenBtn');
+
+  fsBtn?.addEventListener('click', toggleFullscreen);
+  gameFsBtn?.addEventListener('click', toggleFullscreen);
+  rotateFsBtn?.addEventListener('click', toggleFullscreen);
+
+  document.addEventListener('fullscreenchange', updateFullscreenUI);
+  document.addEventListener('webkitfullscreenchange', updateFullscreenUI);
+  updateFullscreenUI();
+  initCueSlider();
 
   if (!S.connected) {
     els.playBtn.disabled = true;
@@ -894,6 +1131,81 @@ function initLobby() {
     els.joinBtn.disabled = true;
   }
   updateSoundIcon();
+}
+
+const isMobileDevice = () =>
+  /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) ||
+  (TOUCH && window.innerWidth < 1024);
+
+async function enterFullscreen() {
+  const root = document.documentElement;
+  try {
+    if (root.requestFullscreen) {
+      await root.requestFullscreen({ navigationUI: 'hide' });
+    } else if (root.webkitRequestFullscreen) {
+      await root.webkitRequestFullscreen();
+    }
+  } catch (err) {
+    console.warn('requestFullscreen:', err);
+  }
+
+  // On mobile phone, lock screen orientation to landscape so phone rotates
+  if (isMobileDevice() && screen.orientation && screen.orientation.lock) {
+    try {
+      await screen.orientation.lock('landscape');
+    } catch (e) {
+      console.warn('screen.orientation.lock:', e);
+    }
+  }
+}
+
+async function exitFullscreen() {
+  if (screen.orientation && screen.orientation.unlock) {
+    try {
+      screen.orientation.unlock();
+    } catch (_) {}
+  }
+  try {
+    if (document.exitFullscreen) {
+      await document.exitFullscreen();
+    } else if (document.webkitExitFullscreen) {
+      await document.webkitExitFullscreen();
+    }
+  } catch (_) {}
+}
+
+async function toggleFullscreen() {
+  const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+  if (!isFs) {
+    await enterFullscreen();
+  } else {
+    await exitFullscreen();
+  }
+}
+
+function updateFullscreenUI() {
+  const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+
+  // Lobby fullscreen button
+  const fsBtn = $('fullscreenBtn');
+  if (fsBtn) {
+    const expand = fsBtn.querySelector('.fs-icon-expand');
+    const compress = fsBtn.querySelector('.fs-icon-compress');
+    const label = fsBtn.querySelector('.fs-label');
+    if (expand) expand.classList.toggle('hidden', isFs);
+    if (compress) compress.classList.toggle('hidden', !isFs);
+    if (label) label.textContent = isFs ? 'Exit full screen' : 'Play in full screen';
+  }
+
+  // Game header fullscreen button
+  const gameFsExpand = $('gameFsExpandIcon');
+  const gameFsCompress = $('gameFsCompressIcon');
+  if (gameFsExpand && gameFsCompress) {
+    gameFsExpand.classList.toggle('hidden', isFs);
+    gameFsCompress.classList.toggle('hidden', !isFs);
+  }
+
+  setTimeout(() => renderer.resize(), 100);
 }
 
 function startRandom() {
@@ -944,10 +1256,9 @@ window.addEventListener('orientationchange', () => setTimeout(() => renderer.res
 const rotatePrompt = $('rotatePrompt');
 const rotateDismiss = $('rotateDismiss');
 let rotateDismissed = false;
-let hasRequestedFullscreen = false;
 
 function checkOrientation() {
-  const isMobile = /Mobi|Android/i.test(navigator.userAgent);
+  const isMobile = isMobileDevice();
   const isLandscape = window.innerWidth > window.innerHeight;
   const inGame = S.screen === 'game';
 
@@ -959,38 +1270,44 @@ function checkOrientation() {
     rotatePrompt.setAttribute('aria-hidden', 'true');
   }
 
-  // Auto-request fullscreen on landscape
-  if (isMobile && inGame && isLandscape && !hasRequestedFullscreen && !document.fullscreenElement) {
-    requestFullscreenIfPossible();
+  // Auto-request fullscreen only when rotated to landscape on phone
+  if (isMobile && inGame && isLandscape && !document.fullscreenElement && !document.webkitFullscreenElement) {
+    autoFullscreenOnRotate();
   }
 }
 
-async function requestFullscreenIfPossible() {
-  if (hasRequestedFullscreen) return;
-  hasRequestedFullscreen = true;
+async function autoFullscreenOnRotate() {
   try {
-    await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
-  } catch {
-    // Ignore - user may have denied or browser blocks it
+    if (document.documentElement.requestFullscreen) {
+      await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
+    } else if (document.documentElement.webkitRequestFullscreen) {
+      await document.documentElement.webkitRequestFullscreen();
+    }
+  } catch (_) {
+    // If browser denies auto fullscreen without user gesture, user can tap the fullscreen button
   }
 }
 
-window.addEventListener('resize', checkOrientation);
+window.addEventListener('resize', () => {
+  checkOrientation();
+  renderer.resize();
+});
+
 window.addEventListener('orientationchange', () => {
   setTimeout(() => {
     renderer.resize();
     checkOrientation();
-  }, 300);
+  }, 200);
 });
 
-// Also try fullscreen on first user interaction in game
-let fullscreenAttempted = false;
-canvas.addEventListener('pointerdown', () => {
-  if (!fullscreenAttempted && S.screen === 'game') {
-    fullscreenAttempted = true;
-    requestFullscreenIfPossible();
-  }
-}, { once: true });
+if (screen.orientation) {
+  screen.orientation.addEventListener('change', () => {
+    setTimeout(() => {
+      renderer.resize();
+      checkOrientation();
+    }, 150);
+  });
+}
 
 rotateDismiss?.addEventListener('click', () => {
   rotateDismissed = true;

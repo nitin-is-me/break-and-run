@@ -354,6 +354,22 @@ function handleMessage(player, raw) {
     case 'shoot':
       handleShoot(player, msg);
       break;
+    case 'aim': {
+      const room = rooms.get(player.roomCode);
+      if (!room || room.phase !== 'playing' || room.turnId !== player.id) break;
+      const other = opponentOf(room, player);
+      if (other && other.ws) {
+        const angle = Number(msg.angle);
+        if (!Number.isFinite(angle)) break;
+        const power = Math.max(0, Math.min(1, Number(msg.power || 0)));
+        send(other.ws, {
+          t: 'aim',
+          angle,
+          power,
+        });
+      }
+      break;
+    }
     case 'place':
       handlePlace(player, msg);
       break;
